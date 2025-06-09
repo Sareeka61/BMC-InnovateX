@@ -1,202 +1,220 @@
-import React, { useState, useRef, useEffect } from 'react';
-import * as tf from '@tensorflow/tfjs';
-import * as cocoSsd from '@tensorflow-models/coco-ssd';
+import React, { useState, useEffect } from "react";
+import * as cocoSsd from "@tensorflow-models/coco-ssd";
+import VideoUploader from "./components/VideoUploader";
+import VideoProcessor from "./components/VideoProcessor";
+import VehicleStats from "./components/VehicleStats";
+import VehicleTracker from "./components/VehicleTracker";
+import * as tf from "@tensorflow/tfjs";
 
 function App() {
+  const [isDarkMode, setIsDarkMode] = useState(false);
   const [video, setVideo] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [model, setModel] = useState(null);
   const [counts, setCounts] = useState({
     car: 0,
     truck: 0,
-    ambulance: 0,
-    person: 0,
-    other: 0
+    motorbikes: 0,
+    other: 0,
   });
-  
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
+  const [totalUniqueVehicles, setTotalUniqueVehicles] = useState(0);
+  const trackerRef = React.useRef(null);
 
   useEffect(() => {
-    // Load the COCO-SSD model
     const loadModel = async () => {
       try {
-        const loadedModel = await cocoSsd.load();
+        // Initialize TensorFlow.js first
+        await tf.ready();
+        // Load model with specific configuration
+        const loadedModel = await cocoSsd.load({
+          base: "mobilenet_v2",
+        });
         setModel(loadedModel);
+        trackerRef.current = new VehicleTracker();
       } catch (error) {
-        console.error('Error loading model:', error);
+        console.error("Error loading model:", error);
       }
     };
     loadModel();
   }, []);
 
-  const handleVideoUpload = (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    // Validate file type
-    if (!file.type.startsWith('video/')) {
-      alert('Please upload a valid video file');
-      return;
-    }
-
-    // Validate file size (max 100MB)
-    if (file.size > 100 * 1024 * 1024) {
-      alert('File size should be less than 100MB');
-      return;
-    }
-
-    const videoUrl = URL.createObjectURL(file);
+  const handleVideoUpload = (videoUrl) => {
     setVideo(videoUrl);
+    resetCounts();
+  };
+
+  const resetCounts = () => {
     setCounts({
       car: 0,
       truck: 0,
-      ambulance: 0,
-      person: 0,
-      other: 0
+      motorbikes: 0,
+      other: 0,
     });
-  };
-
-  const processVideo = async () => {
-    if (!video || !model) return;
-
-    setIsProcessing(true);
-    const videoElement = videoRef.current;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-
-    videoElement.onloadeddata = async () => {
-      canvas.width = videoElement.videoWidth;
-      canvas.height = videoElement.videoHeight;
-    };
-
-    const detectObjects = async () => {
-      if (videoElement.paused || videoElement.ended) {
-        setIsProcessing(false);
-        return;
-      }
-
-      // Draw the current video frame
-      ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-
-      // Detect objects
-      const predictions = await model.detect(canvas);
-      
-      // Reset counts
-      const newCounts = {
-        car: 0,
-        truck: 0,
-        ambulance: 0,
-        person: 0,
-        other: 0
-      };
-
-      // Draw bounding boxes and count objects
-      predictions.forEach(prediction => {
-        const [x, y, width, height] = prediction.bbox;
-        
-        // Draw bounding box
-        ctx.strokeStyle = '#00ff00';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(x, y, width, height);
-
-        // Draw label
-        ctx.fillStyle = '#00ff00';
-        ctx.font = '16px Arial';
-        ctx.fillText(
-          `${prediction.class} (${Math.round(prediction.score * 100)}%)`,
-          x, y > 20 ? y - 5 : y + 20
-        );
-
-        // Update counts
-        switch (prediction.class) {
-          case 'car':
-            newCounts.car++;
-            break;
-          case 'truck':
-            newCounts.truck++;
-            break;
-          case 'person':
-            newCounts.person++;
-            break;
-          default:
-            newCounts.other++;
-        }
-      });
-
-      setCounts(newCounts);
-      requestAnimationFrame(detectObjects);
-    };
-
-    videoElement.play();
-    detectObjects();
+    setTotalUniqueVehicles(0);
+    trackerRef.current = new VehicleTracker();
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 py-6 flex flex-col justify-center sm:py-12">
-      <div className="relative py-3 sm:max-w-xl sm:mx-auto">
-        <div className="relative px-4 py-10 bg-white shadow-lg sm:rounded-3xl sm:p-20">
-          <div className="max-w-md mx-auto">
-            <div className="divide-y divide-gray-200">
-              <div className="py-8 text-base leading-6 space-y-4 text-gray-700 sm:text-lg sm:leading-7">
-                <h1 className="text-3xl font-bold text-center mb-8">Vehicle Detection</h1>
-                
-                <div className="mb-4">
-                  <input
-                    type="file"
-                    accept="video/*"
-                    onChange={handleVideoUpload}
-                    className="block w-full text-sm text-gray-500
-                      file:mr-4 file:py-2 file:px-4
-                      file:rounded-full file:border-0
-                      file:text-sm file:font-semibold
-                      file:bg-blue-50 file:text-blue-700
-                      hover:file:bg-blue-100"
-                  />
-                </div>
-
-                {video && (
-                  <div className="space-y-4">
-                    <video
-                      ref={videoRef}
-                      src={video}
-                      className="w-full rounded-lg shadow-lg"
-                      controls
-                    />
-                    <canvas
-                      ref={canvasRef}
-                      className="w-full rounded-lg shadow-lg"
-                    />
-                    <button
-                      onClick={processVideo}
-                      disabled={isProcessing}
-                      className={`w-full py-2 px-4 rounded-lg text-white font-semibold ${
-                        isProcessing
-                          ? 'bg-gray-400 cursor-not-allowed'
-                          : 'bg-blue-600 hover:bg-blue-700'
-                      }`}
-                    >
-                      {isProcessing ? 'Processing...' : 'Start Detection'}
-                    </button>
-                  </div>
-                )}
-
-                <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-                  <h2 className="text-xl font-semibold mb-2">Detection Counts:</h2>
-                  <div className="grid grid-cols-2 gap-2">
-                    <p>Cars: {counts.car}</p>
-                    <p>Trucks: {counts.truck}</p>
-                    <p>Humans: {counts.person}</p>
-                    <p>Others: {counts.other}</p>
-                  </div>
-                </div>
+    <div
+      className={`min-h-screen transition-colors duration-300 ${
+        isDarkMode
+          ? "bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-white"
+          : "bg-gradient-to-b from-[#F1F5F4] to-[#E7EFED] text-slate-800"
+      }`}
+    >
+      {/* Navbar */}
+      <nav
+        className={`${
+          isDarkMode
+            ? "bg-slate-800/95 border-slate-600"
+            : "bg-white/80 border-[#86BCA6]/20"
+        } backdrop-blur-md border-b shadow-lg transition-colors duration-300`}
+      >
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <div className="text-3xl filter drop-shadow-lg">🚦</div>
+              <div>
+                <h1
+                  className={`text-2xl font-bold tracking-tight ${
+                    isDarkMode
+                      ? "text-slate-100 drop-shadow-md"
+                      : "text-[#2A4849]"
+                  }`}
+                >
+                  Traffix
+                </h1>
+                <p
+                  className={`text-sm ${
+                    isDarkMode ? "text-slate-200" : "text-[#7C8B8C]"
+                  }`}
+                >
+                  Smart Mobility for Smart Cities
+                </p>
               </div>
+            </div>
+            <div className="flex items-center space-x-4">
+              <button
+                onClick={() => setIsDarkMode(!isDarkMode)}
+                className={`p-2 rounded-full transition-all duration-300 ${
+                  isDarkMode
+                    ? "bg-slate-700 text-yellow-300 hover:bg-slate-600 ring-1 ring-slate-500"
+                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+              >
+                {isDarkMode ? "🌙" : "☀️"}
+              </button>
+              {model ? (
+                <span
+                  className={`flex items-center px-4 py-2 rounded-full border transition-all duration-300 ${
+                    isDarkMode
+                      ? "bg-slate-700 border-slate-500 text-slate-100 ring-1 ring-slate-400/20"
+                      : "bg-[#D7EDE2] border-[#86BCA6] text-[#2A4849]"
+                  }`}
+                >
+                  <span
+                    className={`w-2 h-2 rounded-full mr-2 ${
+                      isDarkMode
+                        ? "bg-emerald-400 shadow-lg shadow-emerald-400/50"
+                        : "bg-[#2A4849]"
+                    }`}
+                  ></span>
+                  <span className="font-medium">System Active</span>
+                </span>
+              ) : (
+                <span
+                  className={`flex items-center px-4 py-2 rounded-full border transition-all duration-300 ${
+                    isDarkMode
+                      ? "bg-slate-700 border-slate-600 text-slate-200"
+                      : "bg-[#F1F5F4] border-[#7C8B8C]/30"
+                  }`}
+                >
+                  <span
+                    className={`w-2 h-2 rounded-full mr-2 animate-pulse ${
+                      isDarkMode
+                        ? "bg-blue-400 shadow-lg shadow-blue-400/50"
+                        : "bg-[#86BCA6]"
+                    }`}
+                  ></span>
+                  <span>Initializing...</span>
+                </span>
+              )}
             </div>
           </div>
         </div>
-      </div>
+      </nav>
+
+      <main className="container mx-auto px-4 py-12">
+        <div className="max-w-6xl mx-auto space-y-8">
+          <div
+            className={`rounded-2xl transition-all duration-300 ${
+              isDarkMode
+                ? "bg-slate-800/80 border-slate-600 ring-1 ring-white/10"
+                : "bg-white border-[#86BCA6]/20 shadow-lg"
+            } border`}
+          >
+            <div className="p-8">
+              <VideoUploader
+                onVideoUpload={handleVideoUpload}
+                onResetCounts={resetCounts}
+                className="mb-8"
+                isDarkMode={isDarkMode}
+              />
+
+              {video ? (
+                <VideoProcessor
+                  video={video}
+                  isProcessing={isProcessing}
+                  onProcess={setIsProcessing}
+                  model={model}
+                  trackerRef={trackerRef}
+                  onUpdateCounts={setCounts}
+                  onUpdateTotalVehicles={setTotalUniqueVehicles}
+                  isDarkMode={isDarkMode}
+                />
+              ) : (
+                <div className="text-center py-24">
+                  <div className="text-5xl mb-6 filter drop-shadow-lg">📹</div>
+                  <p
+                    className={`text-xl font-medium mb-2 ${
+                      isDarkMode ? "text-white" : "text-[#2A4849]"
+                    }`}
+                  >
+                    Begin Your Traffic Analysis
+                  </p>
+                  <p
+                    className={isDarkMode ? "text-slate-200" : "text-[#7C8B8C]"}
+                  >
+                    Upload traffic footage to start intelligent monitoring
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <VehicleStats
+            counts={counts}
+            totalUniqueVehicles={totalUniqueVehicles}
+            isDarkMode={isDarkMode}
+          />
+        </div>
+      </main>
+
+      <footer
+        className={`border-t mt-12 transition-colors duration-300 ${
+          isDarkMode
+            ? "border-slate-800 bg-slate-900/50"
+            : "border-[#86BCA6]/20"
+        }`}
+      >
+        <div className="max-w-7xl mx-auto px-4 py-8 text-center">
+          <p className={isDarkMode ? "text-slate-300" : "text-[#7C8B8C]"}>
+            Built by Team Synergy
+          </p>
+        </div>
+      </footer>
     </div>
   );
 }
 
-export default App; 
+export default App;
